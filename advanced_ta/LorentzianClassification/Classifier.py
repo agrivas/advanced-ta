@@ -450,8 +450,8 @@ class LorentzianClassification:
         # yhat1_g = [self.yhat1[v] if np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.NaN for v in range(self.df.head(len).index.size)]
         # yhat1_r = [self.yhat1[v] if ~np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.NaN for v in range(self.df.head(len).index.size)]
         sub_plots = [
-            mpf.make_addplot(self.yhat1.head(len), ylabel="Kernel Regression Estimate", color='blue'),
-            mpf.make_addplot(self.yhat2.head(len), ylabel="yhat2", color='gray'),
+            mpf.make_addplot(self.yhat1[:len], ylabel="Kernel Regression Estimate", color='blue'),
+            mpf.make_addplot(self.yhat2[:len], ylabel="yhat2", color='gray'),
             mpf.make_addplot(self.df["startLongTrade"], ylabel="startLongTrade", color='green', type='scatter', markersize=120, marker='^'),
             mpf.make_addplot(self.df["startShortTrade"], ylabel="startShortTrade", color='red', type='scatter', markersize=120, marker='v'),
         ]
