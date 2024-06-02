@@ -425,6 +425,9 @@ class LorentzianClassification:
         self.df["endLongTrade"] = np.where(endLongTrade, self.df['high'], np.NaN)
         self.df["endShortTrade"] = np.where(endShortTrade, self.df['low'], np.NaN)
 
+        self.df["endLongTradeDynamic"] = np.where(endLongTrade, self.df['high'], np.NaN)
+        self.df["endShortTradeDynamic"] = np.where(endShortTrade, self.df['low'], np.NaN)
+
 
     # =============================
     # ==== Dump or Return Data ====
@@ -450,10 +453,14 @@ class LorentzianClassification:
         # yhat1_g = [self.yhat1[v] if np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.NaN for v in range(self.df.head(len).index.size)]
         # yhat1_r = [self.yhat1[v] if ~np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.NaN for v in range(self.df.head(len).index.size)]
         sub_plots = [
-            mpf.make_addplot(self.yhat1[:len], ylabel="Kernel Regression Estimate", color='blue'),
-            mpf.make_addplot(self.yhat2[:len], ylabel="yhat2", color='gray'),
+            #mpf.make_addplot(self.yhat1[:len], ylabel="Kernel Regression Estimate", color='blue'),
+            #mpf.make_addplot(self.yhat2[:len], ylabel="yhat2", color='gray'),
             mpf.make_addplot(self.df["startLongTrade"], ylabel="startLongTrade", color='green', type='scatter', markersize=120, marker='^'),
             mpf.make_addplot(self.df["startShortTrade"], ylabel="startShortTrade", color='red', type='scatter', markersize=120, marker='v'),
+            mpf.make_addplot(self.df["endLongTrade"], ylabel="endLongTrade", color='blue', type='scatter', markersize=120, marker='v'),
+            mpf.make_addplot(self.df["endShortTrade"], ylabel="endShortTrade", color='yellow', type='scatter', markersize=120, marker='^'),
+            mpf.make_addplot(self.df["endLongTradeDynamic"], ylabel="endLongTradeDynamic", color='blue', type='scatter', markersize=120, marker='v'),
+            mpf.make_addplot(self.df["endShortTradeDynamic"], ylabel="endShortTradeDynamic", color='yellow', type='scatter', markersize=120, marker='^'),
         ]
         s = mpf.make_mpf_style(base_mpf_style='yahoo', rc={'figure.facecolor': 'lightgray'}, edgecolor='black',
                             marketcolors=mpf.make_marketcolors(base_mpf_style='yahoo', inherit=True, alpha=0.2))
