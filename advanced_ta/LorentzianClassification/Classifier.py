@@ -459,8 +459,8 @@ class LorentzianClassification:
             mpf.make_addplot(self.df["startShortTrade"], ylabel="startShortTrade", color='red', type='scatter', markersize=120, marker='v'),
             mpf.make_addplot(self.df["endLongTrade"], ylabel="endLongTrade", color='blue', type='scatter', markersize=120, marker='v'),
             mpf.make_addplot(self.df["endShortTrade"], ylabel="endShortTrade", color='yellow', type='scatter', markersize=120, marker='^'),
-            mpf.make_addplot(self.df["endLongTradeDynamic"], ylabel="endLongTradeDynamic", color='blue', type='scatter', markersize=120, marker='v'),
-            mpf.make_addplot(self.df["endShortTradeDynamic"], ylabel="endShortTradeDynamic", color='yellow', type='scatter', markersize=120, marker='^'),
+            mpf.make_addplot(self.df["endLongTradeDynamic"], ylabel="endLongTradeDynamic", color='purple', type='scatter', markersize=120, marker='v'),
+            mpf.make_addplot(self.df["endShortTradeDynamic"], ylabel="endShortTradeDynamic", color='orange', type='scatter', markersize=120, marker='^'),
         ]
         s = mpf.make_mpf_style(base_mpf_style='yahoo', rc={'figure.facecolor': 'lightgray'}, edgecolor='black',
                             marketcolors=mpf.make_marketcolors(base_mpf_style='yahoo', inherit=True, alpha=0.2))
