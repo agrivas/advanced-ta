@@ -16,7 +16,7 @@ class __Config__:
 
 
 class Settings(__Config__):
-    source: pd.Series  # Source of the input data
+    source: str  # Source field of the input data
     neighborsCount = 8  # Number of neighbors to consider
     maxBarsBack = 2000  # Maximum number of bars to look back for calculations
     useDynamicExits = False # Dynamic exits attempt to let profits ride by dynamically adjusting the exit threshold based on kernel regression logic

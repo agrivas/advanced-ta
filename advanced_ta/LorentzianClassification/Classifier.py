@@ -156,7 +156,7 @@ class LorentzianClassification:
                 Feature("RSI", 9, 2),   # f5
             ]
         if settings == None:
-            settings = Settings(source=data['close'])
+            settings = Settings(source='close')
 
         if filterSettings == None:
             filterSettings = FilterSettings(
@@ -191,7 +191,7 @@ class LorentzianClassification:
         self.filter = Filter(
             volatility = ml.filter_volatility(data['high'], data['low'], data['close'], filterSettings.useVolatilityFilter, 1, 10),
             regime = ml.regime_filter(ohlc4, data['high'], data['low'], filterSettings.useRegimeFilter, filterSettings.regimeThreshold),
-            adx = ml.filter_adx(settings.source, data['high'], data['low'], filterSettings.adxThreshold, filterSettings.useAdxFilter, 14)
+            adx = ml.filter_adx(self.df[settings.source], data['high'], data['low'], filterSettings.adxThreshold, filterSettings.useAdxFilter, 14)
         )
         self.__classify()
 
@@ -258,7 +258,7 @@ class LorentzianClassification:
            "price-time" due to proximity to significant economic events.
         """
 
-        src = self.settings.source
+        src = self.df[self.settings.source]
 
         def get_lorentzian_predictions():
             for bar_index in range(maxBarsBackIndex): yield 0
