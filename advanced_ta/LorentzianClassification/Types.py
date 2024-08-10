@@ -56,6 +56,7 @@ class FilterSettings(__Config__):
     useAdxFilter = False,  # Whether to use the ADX filter
     regimeThreshold = 0.0,  # Threshold for detecting Trending/Ranging markets
     adxThreshold = 0  # Threshold for detecting Trending/Ranging markets
+    adxLength = 0 # Length of the ADX indicator
 
     kernelFilter: KernelFilter
 

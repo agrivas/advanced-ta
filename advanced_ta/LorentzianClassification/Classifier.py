@@ -165,6 +165,7 @@ class LorentzianClassification:
                 useAdxFilter = False,
                 regimeThreshold=-0.1,
                 adxThreshold = 20,
+                adxLength = 14,
                 kernelFilter = KernelFilter()
             )
         if hasattr(filterSettings, 'kernelFilter'):
@@ -191,7 +192,7 @@ class LorentzianClassification:
         self.filter = Filter(
             volatility = ml.filter_volatility(data['high'], data['low'], data['close'], filterSettings.useVolatilityFilter, 1, 10),
             regime = ml.regime_filter(ohlc4, data['high'], data['low'], filterSettings.useRegimeFilter, filterSettings.regimeThreshold),
-            adx = ml.filter_adx(self.df[settings.source], data['high'], data['low'], filterSettings.adxThreshold, filterSettings.useAdxFilter, 14)
+            adx = ml.filter_adx(self.df[settings.source], data['high'], data['low'], filterSettings.adxThreshold, filterSettings.useAdxFilter, filterSettings.adxLength)
         )
         self.__classify()
 
