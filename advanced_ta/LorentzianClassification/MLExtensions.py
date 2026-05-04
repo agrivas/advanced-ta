@@ -145,7 +145,7 @@ def filter_adx(src: pd.Series, high: pd.Series, low: pd.Series, adxThreshold, us
     """
     if not useAdxFilter: return np.array([True]*len(src))
     adx = ADX(high, low, src, length).values
-    return (adx > adxThreshold)
+    return np.nan_to_num(adx, nan=0.0) >= adxThreshold
 
 def filter_volatility(high, low, close, useVolatilityFilter, minLength=1, maxLength=10) -> np.array:
     """

@@ -420,14 +420,14 @@ class LorentzianClassification:
         self.df["isNewBuySignal"] = isNewBuySignal
         self.df["isNewSellSignal"] = isNewSellSignal
 
-        self.df["startLongTrade"] = np.where(startLongTrade, self.df['low'], np.NaN)
-        self.df["startShortTrade"] = np.where(startShortTrade, self.df['high'], np.NaN)
+        self.df["startLongTrade"] = np.where(startLongTrade, self.df['low'], np.nan)
+        self.df["startShortTrade"] = np.where(startShortTrade, self.df['high'], np.nan)
 
-        self.df["endLongTrade"] = np.where(endLongTrade, self.df['high'], np.NaN)
-        self.df["endShortTrade"] = np.where(endShortTrade, self.df['low'], np.NaN)
+        self.df["endLongTrade"] = np.where(endLongTrade, self.df['high'], np.nan)
+        self.df["endShortTrade"] = np.where(endShortTrade, self.df['low'], np.nan)
 
-        self.df["endLongTradeDynamic"] = np.where(endLongTrade, self.df['high'], np.NaN)
-        self.df["endShortTradeDynamic"] = np.where(endShortTrade, self.df['low'], np.NaN)
+        self.df["endLongTradeDynamic"] = np.where(endLongTrade, self.df['high'], np.nan)
+        self.df["endShortTradeDynamic"] = np.where(endShortTrade, self.df['low'], np.nan)
 
 
     # =============================
@@ -451,8 +451,8 @@ class LorentzianClassification:
         import mplfinance as mpf
         len = self.df.index.size
 
-        # yhat1_g = [self.yhat1[v] if np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.NaN for v in range(self.df.head(len).index.size)]
-        # yhat1_r = [self.yhat1[v] if ~np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.NaN for v in range(self.df.head(len).index.size)]
+        # yhat1_g = [self.yhat1[v] if np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.nan for v in range(self.df.head(len).index.size)]
+        # yhat1_r = [self.yhat1[v] if ~np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.nan for v in range(self.df.head(len).index.size)]
         sub_plots = [
             #mpf.make_addplot(self.yhat1[:len], ylabel="Kernel Regression Estimate", color='blue'),
             #mpf.make_addplot(self.yhat2[:len], ylabel="yhat2", color='gray'),
