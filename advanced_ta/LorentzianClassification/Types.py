@@ -51,14 +51,18 @@ class KernelFilter(__Config__):
 
 
 class FilterSettings(__Config__):
-    useVolatilityFilter = False,  # Whether to use the volatility filter
-    useRegimeFilter = False,  # Whether to use the trend detection filter
-    useAdxFilter = False,  # Whether to use the ADX filter
-    regimeThreshold = 0.0,  # Threshold for detecting Trending/Ranging markets
-    adxThreshold = 0  # Threshold for detecting Trending/Ranging markets
-    adxLength = 14 # Length of the ADX indicator
+    useVolatilityFilter = False
+    useRegimeFilter = False
+    useAdxFilter = False
+    regimeThreshold = 0.0
+    adxThreshold = 0
+    adxLength = 14
+    kernelFilter = None
 
-    kernelFilter: KernelFilter
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.kernelFilter is None:
+            self.kernelFilter = KernelFilter()
 
 
 class Filter(__Config__):

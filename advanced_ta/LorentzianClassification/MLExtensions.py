@@ -1,164 +1,169 @@
-import math
 import numpy as np
 import pandas as pd
 from ta.momentum import rsi as RSI
 from ta.volatility import average_true_range as ATR
 from ta.trend import cci as CCI, adx as ADX, ema_indicator as EMA, sma_indicator as SMA
-from sklearn.preprocessing import MinMaxScaler
-
 
 # ==========================
 # ==== Helper Functions ====
 # ==========================
 
+def log_return_zscore(src: pd.Series, window=200) -> np.array:
+    """
+    Standardizes a price series using a rolling Z-score of log-returns.
+    This eliminates look-ahead bias and ensures geometric stationarity.
+    """
+    log_ret = np.log(src / src.shift(1))
+    rolling_mean = log_ret.rolling(window=window).mean()
+    rolling_std = log_ret.rolling(window=window).std()
+    
+    z_score = (log_ret - rolling_mean) / rolling_std
+    return z_score.fillna(0).values
 
-def normalize(src: np.array, range_min=0, range_max=1) -> np.array:
+def rolling_zscore(src: pd.Series, window=200) -> np.array:
     """
-    function Rescales a source value with an unbounded range to a bounded range
-    param src: <np.array> The input series
-    param range_min: <float> The minimum value of the unbounded range
-    param range_max: <float> The maximum value of the unbounded range
-    returns <np.array> The normalized series
+    Standardizes an oscillator (which may cross zero) using a rolling Z-score.
     """
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    return range_min + (range_max - range_min) * scaler.fit_transform(src.reshape(-1,1))[:,0]
+    rolling_mean = src.rolling(window=window).mean()
+    rolling_std = src.rolling(window=window).std()
+    
+    z_score = (src - rolling_mean) / rolling_std
+    return z_score.fillna(0).values
 
+def rescale_to_unit(src: np.array) -> np.array:
+    """
+    Squashes a Z-score into a [0, 1] range using a Sigmoid function.
+    Handles outliers much better than Min-Max scaling.
+    """
+    return 1 / (1 + np.exp(-src))
 
-def rescale(src: np.array, old_min, old_max, new_min=0, new_max=1) -> np.array:
-    """
-    function Rescales a source value with a bounded range to anther bounded range
-    param src: <np.array> The input series
-    param old_min: <float> The minimum value of the range to rescale from
-    param old_max: <float> The maximum value of the range to rescale from
-    param new_min: <float> The minimum value of the range to rescale to
-    param new_max: <float> The maximum value of the range to rescale to 
-    returns <np.array> The rescaled series
-    """
-    rescaled_value = new_min + (new_max - new_min) * (src - old_min) / max(old_max - old_min, 10e-10)
-    return rescaled_value
+# ==========================
+# ==== Feature Functions ====
+# ==========================
 
+def n_rsi(src: pd.Series, n1=14, n2=1) -> np.array:
+    """
+    Normalized RSI based on Log-Price momentum.
+    """
+    log_src = np.log(src)
+    rsi_val = EMA(RSI(log_src, n1), n2)
+    # RSI is strictly bounded [0, 100], so linear scaling to [0, 1] is safe
+    return rsi_val.fillna(50).values / 100.0
 
-def n_rsi(src: pd.Series, n1, n2) -> np.array:
+def n_cci(highSrc: pd.Series, lowSrc: pd.Series, closeSrc: pd.Series, n1=20, n2=1) -> np.array:
     """
-    function Returns the normalized RSI ideal for use in ML algorithms
-    param src: <np.array> The input series
-    param n1: <int> The length of the RSI
-    param n2: <int> The smoothing length of the RSI
-    returns <np.array> The normalized RSI
+    Normalized CCI. Uses log-prices and Z-score standardization.
     """
-    return rescale(EMA(RSI(src, n1), n2).values, 0, 100)
-
-
-def n_cci(highSrc: pd.Series, lowSrc: pd.Series, closeSrc: pd.Series, n1, n2) -> np.array:
-    """
-    function Returns the normalized CCI ideal for use in ML algorithms
-    param highSrc: <np.array> The input series for the high price
-    param lowSrc: <np.array> The input series for the low price
-    param closeSrc: <np.array> The input series for the close price
-    param n1: <int> The length of the CCI
-    param n2: <int> The smoothing length of the CCI
-    returns <np.array> The normalized CCI
-    """
-    return normalize(EMA(CCI(highSrc, lowSrc, closeSrc, n1), n2).values)
+    log_h = np.log(highSrc)
+    log_l = np.log(lowSrc)
+    log_c = np.log(closeSrc)
+    
+    cci_val = CCI(log_h, log_l, log_c, n1)
+    smoothed_cci = EMA(cci_val, n2)
+    
+    # CCI is unbounded and crosses zero; apply rolling Z-score then Sigmoid
+    z_cci = rolling_zscore(smoothed_cci, window=200)
+    return rescale_to_unit(z_cci)
 
 def n_wt(src: pd.Series, n1=10, n2=11) -> np.array:
     """
-    function Returns the normalized WaveTrend Classic series ideal for use in ML algorithms
-    param src: <np.array> The input series
-    param n1: <int> The first smoothing length for WaveTrend Classic
-    param n2: <int> The second smoothing length for the WaveTrend Classic
-    returns <np.array> The normalized WaveTrend Classic series
+    Log-Stationary WaveTrend. Uses log-price to ensure percentage-based cycles.
     """
-    ema1 = EMA(src, n1)
-    ema2 = EMA(abs(src - ema1), n1)
-    ci = (src - ema1) / (0.015 * ema2)
-    wt1 = EMA(ci, n2)  # tci
+    log_src = np.log(src)
+    ema1 = EMA(log_src, n1)
+    ema2 = EMA(np.abs(log_src - ema1), n1)
+    ci = (log_src - ema1) / (0.015 * ema2)
+    wt1 = EMA(ci, n2) 
     wt2 = SMA(wt1, 4)
-    return normalize((wt1 - wt2).values)
+    
+    wave_trend = wt1 - wt2
+    # WaveTrend crosses zero; apply rolling Z-score then Sigmoid
+    z_wt = rolling_zscore(wave_trend, window=200)
+    return rescale_to_unit(z_wt)
 
-def n_adx(highSrc: pd.Series, lowSrc: pd.Series, closeSrc: pd.Series, n1) -> np.array:
+def n_adx(highSrc: pd.Series, lowSrc: pd.Series, closeSrc: pd.Series, n1=14) -> np.array:
     """
-    function Returns the normalized ADX ideal for use in ML algorithms
-    param highSrc: <np.array> The input series for the high price
-    param lowSrc: <np.array> The input series for the low price
-    param closeSrc: <np.array> The input series for the close price
-    param n1: <int> The length of the ADX
+    Normalized ADX. Measures trend strength independent of price scale.
     """
-    return rescale(ADX(highSrc, lowSrc, closeSrc, n1).values, 0, 100)
-    # TODO: Replicate ADX logic from jdehorty
+    log_h = np.log(highSrc)
+    log_l = np.log(lowSrc)
+    log_c = np.log(closeSrc)
+    
+    adx_val = ADX(log_h, log_l, log_c, n1)
+    # ADX is bounded [0, 100]
+    return adx_val.fillna(0).values / 100.0
 
+# ==========================
+# ==== Advanced Filters ====
+# ==========================
 
-# =================
-# ==== Filters ====
-# =================
-def regime_filter(src: pd.Series, high: pd.Series, low: pd.Series, useRegimeFilter, threshold) -> np.array:
+def regime_filter(src: pd.Series, high: pd.Series, low: pd.Series, useRegimeFilter: bool, threshold: float) -> np.array:
     """
-    regime_filter
-    param src: <np.array> The source series
-    param high: <np.array> The input series for the high price
-    param low: <np.array> The input series for the low price
-    param useRegimeFilter: <bool> Whether to use the regime filter
-    param threshold: <float> The threshold
-    returns <np.array> Boolean indicating whether or not to let the signal pass through the filter
+    Log-Velocity Regime Filter. 
+    Detects when the 'Percentage Velocity' of the market exceeds historical norms.
     """
-    if not useRegimeFilter: return np.array([True]*len(src))
+    if not useRegimeFilter: 
+        return np.array([True] * len(src))
 
-    # @njit(parallel=True, cache=True)
-    def klmf(src: np.array, high: np.array, low: np.array):
-        value1 = np.array([0.0]*len(src))
-        value2 = np.array([0.0]*len(src))
-        klmf = np.array([0.0]*len(src))
+    log_close = np.log(src)
+    log_high = np.log(high)
+    log_low = np.log(low)
 
-        for i in range(len(src)):
-            if (high[i] - low[i]) == 0: continue
-            value1[i] = 0.2 * (src[i] - src[i - 1 if i >= 1 else 0]) + 0.8 * value1[i - 1 if i >= 1 else 0]
-            value2[i] = 0.1 * (high[i] - low[i]) + 0.8 * value2[i - 1 if i >= 1 else 0]
+    def klmf(c_src, h, l):
+        v1 = np.zeros_like(c_src)
+        v2 = np.zeros_like(c_src)
+        out = np.zeros_like(c_src)
+        for i in range(1, len(c_src)):
+            # Velocity of log-price change
+            v1[i] = 0.2 * (c_src[i] - c_src[i-1]) + 0.8 * v1[i-1]
+            # Volatility (Log High-Low Range)
+            v2[i] = 0.1 * (h[i] - l[i]) + 0.8 * v2[i-1]
+            
+            omega = np.abs(v1[i] / v2[i]) if v2[i] != 0 else 0
+            alpha = (-(omega**2) + np.sqrt(omega**4 + 16*omega**2)) / 8
+            out[i] = alpha * c_src[i] + (1 - alpha) * out[i-1]
+        return out
 
-        with np.errstate(divide='ignore',invalid='ignore'):
-            omega = np.nan_to_num(np.abs(np.divide(value1, value2)))
-        alpha = (-(omega ** 2) + np.sqrt((omega ** 4) + 16 * (omega ** 2))) / 8
+    kf_curve = klmf(log_close.values, log_high.values, log_low.values)
+    
+    # Slope of the log-filtered curve (Percentage Change Velocity)
+    slope = np.abs(np.diff(kf_curve, prepend=kf_curve[0]))
+    
+    # Use Rolling Mean of slope to create a dynamic threshold
+    ema_slope = EMA(pd.Series(slope), 200).values
+    
+    with np.errstate(divide='ignore', invalid='ignore'):
+        normalized_slope = np.nan_to_num((slope - ema_slope) / ema_slope, nan=0.0)
+    
+    return normalized_slope >= threshold
 
-        for i in range(len(src)):
-            klmf[i] = alpha[i] * src[i] + (1 - alpha[i]) * klmf[i - 1 if i >= 1 else 0]
-
-        return klmf
-
-    filter = np.array([False]*len(src))
-    absCurveSlope = np.abs(np.diff(klmf(src.values, high.values, low.values), prepend=0.0))
-    exponentialAverageAbsCurveSlope = EMA(pd.Series(absCurveSlope), 200).values
-    with np.errstate(divide='ignore',invalid='ignore'):
-        normalized_slope_decline = (absCurveSlope - exponentialAverageAbsCurveSlope) / exponentialAverageAbsCurveSlope
-    flags = (normalized_slope_decline >= threshold)
-    filter[(len(filter) - len(flags)):] = flags
-    return filter
-
-def filter_adx(src: pd.Series, high: pd.Series, low: pd.Series, adxThreshold, useAdxFilter, length=14) -> np.array:
+def filter_adx(src: pd.Series, high: pd.Series, low: pd.Series, adxThreshold: float, useAdxFilter: bool, length=14) -> np.array:
     """
-    function filter_adx
-    param src: <np.array> The source series
-    param high: <np.array> The input series for the high price
-    param low: <np.array> The input series for the low price
-    param adxThreshold: <int> The ADX threshold
-    param useAdxFilter: <bool> Whether to use the ADX filter
-    param length: <int> The length of the ADX
-    returns <np.array> Boolean indicating whether or not to let the signal pass through the filter
+    ADX Filter applied to log prices to maintain geometric symmetry.
     """
-    if not useAdxFilter: return np.array([True]*len(src))
-    adx = ADX(high, low, src, length).values
-    return np.nan_to_num(adx, nan=0.0) >= adxThreshold
+    if not useAdxFilter: 
+        return np.array([True] * len(src))
+        
+    log_h = np.log(high)
+    log_l = np.log(low)
+    log_c = np.log(src)
+    
+    adx_series = ADX(log_h, log_l, log_c, length).values
+    return np.nan_to_num(adx_series, nan=0.0) >= adxThreshold
 
-def filter_volatility(high, low, close, useVolatilityFilter, minLength=1, maxLength=10) -> np.array:
+def filter_volatility(high: pd.Series, low: pd.Series, close: pd.Series, useVolatilityFilter: bool, minLength=1, maxLength=10) -> np.array:
     """
-    function filter_volatility
-    param high: <np.array> The input series for the high price
-    param low: <np.array> The input series for the low price
-    param close: <np.array> The input series for the close price
-    param useVolatilityFilter: <bool> Whether to use the volatility filter
-    param minLength: <int> The minimum length of the ATR
-    param maxLength: <int> The maximum length of the ATR
-    returns <np.array> Boolean indicating whether or not to let the signal pass through the filter
+    Volatility filter using Log-ATR. Ensures that short-term percentage volatility
+    is compared correctly against long-term percentage volatility.
     """
-    if not useVolatilityFilter: return np.array([True]*len(close))
-    recentAtr = ATR(high, low, close, minLength).values
-    historicalAtr = ATR(high, low, close, maxLength).values
-    return (recentAtr > historicalAtr)
+    if not useVolatilityFilter: 
+        return np.array([True] * len(close))
+        
+    log_h = np.log(high)
+    log_l = np.log(low)
+    log_c = np.log(close)
+    
+    recent_atr = ATR(log_h, log_l, log_c, minLength).values
+    historical_atr = ATR(log_h, log_l, log_c, maxLength).values
+    
+    return np.nan_to_num(recent_atr, nan=0.0) > np.nan_to_num(historical_atr, nan=0.0)

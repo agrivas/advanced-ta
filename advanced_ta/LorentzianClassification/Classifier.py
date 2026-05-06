@@ -1,474 +1,204 @@
 import pandas as pd
 import numpy as np
-import math
-from ..Utils import *
-from .Types import *
+from ta.trend import ema_indicator as EMA, sma_indicator as SMA
 from . import MLExtensions as ml
 from . import KernelFunctions as kernels
-from ta.trend import ema_indicator as EMA, sma_indicator as SMA
-
-"""
-====================
-==== Background ====
-====================
-
-When using Machine Learning algorithms like K-Nearest Neighbors, choosing an
-appropriate distance metric is essential. Euclidean Distance is often used as
-the default distance metric, but it may not always be the best choice. This is
-because market data is often significantly impacted by proximity to significant
-world events such as FOMC Meetings and Black Swan events. These major economic
-events can contribute to a warping effect analogous a massive object's 
-gravitational warping of Space-Time. In financial markets, this warping effect 
-operates on a continuum, which can analogously be referred to as "Price-Time".
-
-To help to better account for this warping effect, Lorentzian Distance can be
-used as an alternative distance metric to Euclidean Distance. The geometry of
-Lorentzian Space can be difficult to visualize at first, and one of the best
-ways to intuitively understand it is through an example involving 2 feature
-dimensions (z=2). For purposes of this example, let's assume these two features
-are Relative Strength Index (RSI) and the Average Directional Index (ADX). In
-reality, the optimal number of features is in the range of 3-8, but for the sake
-of simplicity, we will use only 2 features in this example.
-
-Fundamental Assumptions:
-(1) We can calculate RSI and ADX for a given chart.
-(2) For simplicity, values for RSI and ADX are assumed to adhere to a Gaussian 
-    distribution in the range of 0 to 100.
-(3) The most recent RSI and ADX value can be considered the origin of a coordinate 
-    system with ADX on the x-axis and RSI on the y-axis.
-
-Distances in Euclidean Space:
-Measuring the Euclidean Distances of historical values with the most recent point
-at the origin will yield a distribution that resembles Figure 1 (below).
-
-                       [RSI]
-                         |                      
-                         |                   
-                         |                 
-                     ...:::....              
-               .:.:::••••••:::•::..             
-             .:•:.:•••::::••::••....::.            
-            ....:••••:••••••••::••:...:•.          
-           ...:.::::::•••:::•••:•••::.:•..          
-           ::•:.:•:•••••••:.:•::::::...:..         
- |--------.:•••..•••••••:••:...:::•:•:..:..----------[ADX]    
- 0        :•:....:•••••::.:::•••::••:.....            
-          ::....:.:••••••••:•••::••::..:.          
-           .:...:••:::••••••••::•••....:          
-             ::....:.....:•::•••:::::..             
-               ..:..::••..::::..:•:..              
-                   .::..:::.....:                
-                         |            
-                         |                   
-                         |
-                         |
-                        _|_ 0        
-                         
-       Figure 1: Neighborhood in Euclidean Space
-
-Distances in Lorentzian Space:
-However, the same set of historical values measured using Lorentzian Distance will 
-yield a different distribution that resembles Figure 2 (below).
-
-                        
-                        [RSI] 
- ::..                     |                    ..:::  
-  .....                   |                  ......
-   .••••::.               |               :••••••. 
-    .:•••••:.             |            :::••••••.  
-      .•••••:...          |         .::.••••••.    
-        .::•••••::..      |       :..••••••..      
-           .:•••••••::.........::••••••:..         
-             ..::::••••.•••••••.•••••••:.            
-               ...:•••••••.•••••••••::.              
-                 .:..••.••••••.••••..                
- |---------------.:•••••••••••••••••.---------------[ADX]          
- 0             .:•:•••.••••••.•••••••.                
-             .••••••••••••••••••••••••:.            
-           .:••••••••••::..::.::••••••••:.          
-         .::••••••::.     |       .::•••:::.       
-        .:••••••..        |          :••••••••.     
-      .:••••:...          |           ..•••••••:.   
-    ..:••::..             |              :.•••••••.   
-   .:•....                |               ...::.:••.  
-  ...:..                  |                   :...:••.     
- :::.                     |                       ..::  
-                         _|_ 0
-
-      Figure 2: Neighborhood in Lorentzian Space 
-
-
-Observations:
-(1) In Lorentzian Space, the shortest distance between two points is not 
-    necessarily a straight line, but rather, a geodesic curve.
-(2) The warping effect of Lorentzian distance reduces the overall influence  
-    of outliers and noise.
-(3) Lorentzian Distance becomes increasingly different from Euclidean Distance 
-    as the number of nearest neighbors used for comparison increases.
-"""
+from .Types import Direction, Feature, Settings, FilterSettings, KernelFilter, Filter
 
 class LorentzianClassification:
-    
-    from .Types import Feature, Settings, KernelFilter, FilterSettings
-
-    df: pd.DataFrame = None
-    features = list[np.array]()
-    settings: Settings
-    filterSettings: FilterSettings
-    # Filter object for filtering the ML predictions
-    filter: Filter
-
-    yhat1: np.array
-    yhat2: np.array
-
-
-    # Feature Variables: User-Defined Inputs for calculating Feature Series.
-    # Options: ["RSI", "WT", "CCI", "ADX"]
-    # FeatureSeries Object: Calculated Feature Series based on Feature Variables
-    def series_from(data: pd.DataFrame, feature_string, f_paramA, f_paramB) -> np.array:
-        match feature_string:
-            case "RSI":
-                return ml.n_rsi(data['close'], f_paramA, f_paramB)
-            case "WT":
-                hlc3 = (data['high'] + data['low'] + data['close']) / 3
-                return ml.n_wt(hlc3, f_paramA, f_paramB)
-            case "CCI":
-                return ml.n_cci(data['high'], data['low'], data['close'], f_paramA, f_paramB)
-            case "ADX":
-                return ml.n_adx(data['high'], data['low'], data['close'], f_paramA)
-
+    # Expose types as class attributes for backward compatibility
+    Feature = Feature
+    Settings = Settings
+    FilterSettings = FilterSettings
+    KernelFilter = KernelFilter
+    Filter = Filter
+    Direction = Direction
 
     def __init__(self, data: pd.DataFrame, features: list = None, settings: Settings = None, filterSettings: FilterSettings = None):
         self.df = data.copy()
-        self.features = []
-        self.filterSettings = None
-        self.settings = None
-        self.filter = None
-        self.yhat1 = None
-        self.yhat2 = None
+        self.settings = settings or Settings(source='close')
+        self.filterSettings = filterSettings or FilterSettings()
 
-        if features == None:
-            features = [
-                Feature("RSI", 14, 2),  # f1
-                Feature("WT", 10, 11),  # f2
-                Feature("CCI", 20, 2),  # f3
-                Feature("ADX", 20, 2),  # f4
-                Feature("RSI", 9, 2),   # f5
-            ]
-        if settings == None:
-            settings = Settings(source='close')
+        # 1. Feature Generation (using the updated MLExtensions.py logic)
+        self.feature_data = self._generate_features(features)
 
-        if filterSettings == None:
-            filterSettings = FilterSettings(
-                useVolatilityFilter = True,
-                useRegimeFilter = True,
-                useAdxFilter = False,
-                regimeThreshold=-0.1,
-                adxThreshold = 20,
-                adxLength = 14,
-                kernelFilter = KernelFilter()
-            )
-        if hasattr(filterSettings, 'kernelFilter'):
-            self.useKernelFilter = True
-        else:
-            self.useKernelFilter = False
-            filterSettings.kernelFilter = KernelFilter()
+        # 2. Kernel Smoother (using the updated KernelFunctions.py logic)
+        k = self.filterSettings.kernelFilter
+        self.yhat1 = kernels.rational_quadratic(self.df['close'], k.lookbackWindow, k.relativeWeight, k.regressionLevel)
+        self.yhat2 = kernels.gaussian(self.df['close'], k.lookbackWindow - k.crossoverLag, k.regressionLevel)
+
+        # 3. Main Classification Execution
+        self._classify()
+
+    def _generate_features(self, features):
+        """Generates the standardized feature matrix."""
+        feature_list = []
+        # Default features if none provided
+        features = features or [
+            Feature("RSI", 14, 2),
+            Feature("WT", 10, 11),
+            Feature("CCI", 20, 2),
+            Feature("ADX", 20, 2)
+        ]
 
         for f in features:
-            if type(f) == Feature:
-                self.features.append(LorentzianClassification.series_from(data, f.type, f.param1, f.param2))
+            if isinstance(f, pd.Series):
+                feature_list.append(f.values)
             else:
-                match type(f):
-                    case np.ndarray:
-                        self.features.append(f)
-                    case pd.Series:
-                        self.features.append(f.values)
-                    case list:
-                        self.features.append(np.array(f))
+                match f.type:
+                    case "RSI": feature_list.append(ml.n_rsi(self.df['close'], f.param1, f.param2))
+                    case "WT":  feature_list.append(ml.n_wt(self.df['close'], f.param1, f.param2))
+                    case "CCI": feature_list.append(ml.n_cci(self.df['high'], self.df['low'], self.df['close'], f.param1, f.param2))
+                    case "ADX": feature_list.append(ml.n_adx(self.df['high'], self.df['low'], self.df['close'], f.param1))
 
-        self.settings = settings
-        self.filterSettings = filterSettings
-        ohlc4 = (data['open'] + data['high'] + data['low'] + data['close']) / 4
-        self.filter = Filter(
-            volatility = ml.filter_volatility(data['high'], data['low'], data['close'], filterSettings.useVolatilityFilter, 1, 10),
-            regime = ml.regime_filter(ohlc4, data['high'], data['low'], filterSettings.useRegimeFilter, filterSettings.regimeThreshold),
-            adx = ml.filter_adx(self.df[settings.source], data['high'], data['low'], filterSettings.adxThreshold, filterSettings.useAdxFilter, filterSettings.adxLength)
-        )
-        self.__classify()
+        return np.array(feature_list).T # Shape: (Bars, Features)
 
+    def _classify(self):
+        """Core ML Logic using optimized Lorentzian Distance."""
+        # Create Training Labels: 1 for Long, -1 for Short (based on 4-bar lookahead)
+        # CRITICAL: Clean NaN values from shift(-4) to prevent NaN poisoning
+        y_train = np.where(self.df['close'].shift(-4) > self.df['close'], 1, -1)
+        y_train = np.nan_to_num(y_train, nan=0).astype(int)
 
-    def __classify(self):
-        # Derived from General Settings
-        maxBarsBackIndex = (len(self.df.index) - self.settings.maxBarsBack) if (len(self.df.index) >= self.settings.maxBarsBack) else 0
+        # Vectorized Lorentzian Distance Calculation
+        predictions = []
+        max_bars = self.settings.maxBarsBack
 
-        isEmaUptrend = np.where(self.settings.useEmaFilter, (self.df["close"] > EMA(self.df["close"], self.settings.emaPeriod)), True)
-        isEmaDowntrend = np.where(self.settings.useEmaFilter, (self.df["close"] < EMA(self.df["close"], self.settings.emaPeriod)), True)
-        isSmaUptrend = np.where(self.settings.useSmaFilter, (self.df["close"] > SMA(self.df["close"], self.settings.smaPeriod)), True)
-        isSmaDowntrend = np.where(self.settings.useSmaFilter, (self.df["close"] < SMA(self.df["close"], self.settings.smaPeriod)), True)
+        for i in range(len(self.df)):
+            if i < 200: # Warmup period for Z-scores/Kernels
+                predictions.append(0)
+                continue
 
-        """
-        =================================
-        ==== Next Bar Classification ====
-        =================================
+            # Only look back at the historical window (prevents future leakage)
+            start_idx = max(0, i - max_bars)
+            historical_features = self.feature_data[start_idx:i]
+            current_features = self.feature_data[i]
 
-        This model specializes specifically in predicting the direction of price action over the course of the next 4 bars. 
-        To avoid complications with the ML model, this value is hardcoded to 4 bars but support for other training lengths may be added in the future.
+            # Lorentzian Distance: sum(log(1 + |feat_hist - feat_curr|))
+            distances = np.sum(np.log(1 + np.abs(historical_features - current_features)), axis=1)
 
-        =========================
-        ====  Core ML Logic  ====
-        =========================
+            # Find K-Nearest Neighbors
+            k_indices = np.argsort(distances)[:self.settings.neighborsCount]
+            prediction = np.sum(y_train[start_idx + k_indices])
+            predictions.append(prediction)
 
-        Approximate Nearest Neighbors Search with Lorentzian Distance:
-        A novel variation of the Nearest Neighbors (NN) search algorithm that ensures a chronologically uniform distribution of neighbors.
+        self.df['prediction'] = predictions
+        self._apply_filters()
 
-        In a traditional KNN-based approach, we would iterate through the entire dataset and calculate the distance between the current bar 
-        and every other bar in the dataset and then sort the distances in ascending order. We would then take the first k bars and use their 
-        labels to determine the label of the current bar. 
+    def _apply_filters(self):
+        """Apply Regime, Volatility, and Kernel filters to generate signals."""
+        # Volatility & Regime Filters from ml
+        vol_filter = ml.filter_volatility(self.df['high'], self.df['low'], self.df['close'], self.filterSettings.useVolatilityFilter)
+        regime_filter = ml.regime_filter(self.df['close'], self.df['high'], self.df['low'], self.filterSettings.useRegimeFilter, self.filterSettings.regimeThreshold)
 
-        There are several problems with this traditional KNN approach in the context of real-time calculations involving time series data:
-        - It is computationally expensive to iterate through the entire dataset and calculate the distance between every historical bar and
-          the current bar.
-        - Market time series data is often non-stationary, meaning that the statistical properties of the data change slightly over time.
-        - It is possible that the nearest neighbors are not the most informative ones, and the KNN algorithm may return poor results if the
-          nearest neighbors are not representative of the majority of the data.
+        # ADX Filter
+        adx_filter = ml.filter_adx(self.df['close'], self.df['high'], self.df['low'], self.filterSettings.adxThreshold, self.filterSettings.useAdxFilter, self.filterSettings.adxLength)
 
-        Previously, the user @capissimo attempted to address some of these issues in several of his PineScript-based KNN implementations by:
-        - Using a modified KNN algorithm based on consecutive furthest neighbors to find a set of approximate "nearest" neighbors.
-        - Using a sliding window approach to only calculate the distance between the current bar and the most recent n bars in the dataset.
+        # Kernel Logic: Bullish if RQ is rising or GC crosses above RQ
+        is_bullish_kernel = (self.yhat1 > np.roll(self.yhat1, 1)) | (self.yhat2 > self.yhat1)
+        is_bearish_kernel = (self.yhat1 < np.roll(self.yhat1, 1)) | (self.yhat2 < self.yhat1)
 
-        Of these two approaches, the latter is inherently limited by the fact that it only considers the most recent bars in the overall dataset. 
+        # Combine everything into a clean signal
+        self.df['signal'] = 0
+        long_cond = (self.df['prediction'] > 0) & vol_filter & regime_filter & adx_filter & is_bullish_kernel
+        short_cond = (self.df['prediction'] < 0) & vol_filter & regime_filter & adx_filter & is_bearish_kernel
 
-        The former approach has more potential to leverage historical price action, but is limited by:
-        - The possibility of a sudden "max" value throwing off the estimation
-        - The possibility of selecting a set of approximate neighbors that are not representative of the majority of the data by oversampling 
-          values that are not chronologically distinct enough from one another
-        - The possibility of selecting too many "far" neighbors, which may result in a poor estimation of price action
+        self.df.loc[long_cond, 'signal'] = Direction.LONG
+        self.df.loc[short_cond, 'signal'] = Direction.SHORT
 
-        To address these issues, a novel Approximate Nearest Neighbors (ANN) algorithm is used in this indicator.
+        # EMA Filter
+        if self.settings.useEmaFilter:
+            ema = EMA(self.df['close'], self.settings.emaPeriod)
+            self.df['isEmaUptrend'] = self.df['close'] > ema
+            self.df['isEmaDowntrend'] = self.df['close'] < ema
+            self.df.loc[~self.df['isEmaUptrend'], 'signal'] = 0
+            self.df.loc[~self.df['isEmaDowntrend'], 'signal'] = 0
+        else:
+            self.df['isEmaUptrend'] = True
+            self.df['isEmaDowntrend'] = True
 
-        In the below ANN algorithm:
-        1. The algorithm iterates through the dataset in chronological order, using the modulo operator to only perform calculations every 4 bars.
-           This serves the dual purpose of reducing the computational overhead of the algorithm and ensuring a minimum chronological spacing 
-           between the neighbors of at least 4 bars.
-        2. A list of the k-similar neighbors is simultaneously maintained in both a predictions array and corresponding distances array.
-        3. When the size of the predictions array exceeds the desired number of nearest neighbors specified in settings.neighborsCount, 
-           the algorithm removes the first neighbor from the predictions array and the corresponding distance array.
-        4. The lastDistance variable is overriden to be a distance in the lower 25% of the array. This step helps to boost overall accuracy 
-           by ensuring subsequent newly added distance values increase at a slower rate.
-        5. Lorentzian distance is used as a distance metric in order to minimize the effect of outliers and take into account the warping of 
-           "price-time" due to proximity to significant economic events.
-        """
+        # SMA Filter
+        if self.settings.useSmaFilter:
+            sma = SMA(self.df['close'], self.settings.smaPeriod)
+            self.df['isSmaUptrend'] = self.df['close'] > sma
+            self.df['isSmaDowntrend'] = self.df['close'] < sma
+            self.df.loc[~self.df['isSmaUptrend'], 'signal'] = 0
+            self.df.loc[~self.df['isSmaDowntrend'], 'signal'] = 0
+        else:
+            self.df['isSmaUptrend'] = True
+            self.df['isSmaDowntrend'] = True
 
-        src = self.df[self.settings.source]
+        # Signal state tracking
+        self._compute_signal_states()
 
-        def get_lorentzian_predictions():
-            for bar_index in range(maxBarsBackIndex): yield 0
+    def _compute_signal_states(self):
+        """Compute derived signal state columns for trade logic."""
+        df = self.df
+        signal = df['signal']
 
-            predictions = []
-            distances = []
-            y_train_array = np.where(src.shift(4) < src.shift(0), Direction.SHORT, np.where(src.shift(4) > src.shift(0), Direction.LONG, Direction.NEUTRAL))
+        # isLastSignalBuy / isLastSignalSell
+        df['isLastSignalBuy'] = signal == Direction.LONG
+        df['isLastSignalSell'] = signal == Direction.SHORT
 
-            class Distances(object):
-                batchSize = 50
-                lastBatch = 0
+        # isNewBuySignal: signal flips to LONG from non-LONG
+        prev_signal = signal.shift(1).fillna(0).astype(int)
+        df['isNewBuySignal'] = (signal == Direction.LONG) & (prev_signal != Direction.LONG)
+        df['isNewSellSignal'] = (signal == Direction.SHORT) & (prev_signal != Direction.SHORT)
 
-                def __init__(self, features):
-                    self.size = (len(src) - maxBarsBackIndex)
-                    self.features = features
-                    self.maxBarsBackIndex = maxBarsBackIndex
-                    self.dists = np.array([[0.0] * self.size] * self.batchSize)
-                    self.rows = np.array([0.0] * self.batchSize)
+        # isEarlySignalFlip: signal flipped within last 3 bars
+        df['isEarlySignalFlip'] = df['isNewBuySignal'] | df['isNewSellSignal']
+        for i in range(1, 3):
+            df['isEarlySignalFlip'] |= df['isNewBuySignal'].shift(i).astype(bool).fillna(False) | df['isNewSellSignal'].shift(i).astype(bool).fillna(False)
 
-                def __getitem__(self, item):
-                    batch = math.ceil((item + 1)/self.batchSize) * self.batchSize
-                    if batch > self.lastBatch:
-                        self.dists.fill(0.0)
-                        for feature in self.features:
-                            self.rows.fill(0.0)
-                            fBatch = feature[(self.maxBarsBackIndex + self.lastBatch):(self.maxBarsBackIndex + batch)]
-                            self.rows[:fBatch.size] = fBatch.reshape(-1,)
-                            val = np.log(1 + np.abs(self.rows.reshape(-1,1) - feature[:self.size].reshape(1,-1)))
-                            self.dists += val
-                        self.lastBatch = batch
+        # barsHeld: count of consecutive bars with same non-zero signal
+        df['barsHeld'] = 0
+        for i in range(len(df)):
+            if signal.iloc[i] == 0:
+                df.iloc[i, df.columns.get_loc('barsHeld')] = 0
+            elif i == 0 or signal.iloc[i] != signal.iloc[i-1]:
+                df.iloc[i, df.columns.get_loc('barsHeld')] = 1
+            else:
+                df.iloc[i, df.columns.get_loc('barsHeld')] = df.iloc[i-1, df.columns.get_loc('barsHeld')] + 1
 
-                    return self.dists[item % self.batchSize]
+        # Trade tracking columns
+        df['startLongTrade'] = np.nan
+        df['startShortTrade'] = np.nan
+        df['endLongTrade'] = np.nan
+        df['endShortTrade'] = np.nan
 
-            dists = Distances(self.features)
-            for bar_index in range(maxBarsBackIndex, len(src)):
-                lastDistance = -1.0
-                span = min(self.settings.maxBarsBack, bar_index + 1)
-                for i, d in enumerate(dists[bar_index - maxBarsBackIndex][:span]):
-                    if d >= lastDistance and i % 4:
-                        lastDistance = d
-                        distances.append(d)
-                        predictions.append(round(y_train_array[i]))
-                        if len(predictions) > self.settings.neighborsCount:
-                            lastDistance = distances[round(self.settings.neighborsCount*3/4)]
-                            distances.pop(0)
-                            predictions.pop(0)
-                yield sum(predictions)
+        in_long = False
+        in_short = False
+        entry_price = None
 
+        for i in range(len(df)):
+            if df['isNewBuySignal'].iloc[i]:
+                if in_short:
+                    df.iloc[i, df.columns.get_loc('endShortTrade')] = df['close'].iloc[i]
+                    in_short = False
+                in_long = True
+                entry_price = df['close'].iloc[i]
+                df.iloc[i, df.columns.get_loc('startLongTrade')] = entry_price
 
-        prediction = np.array([p for p in get_lorentzian_predictions()])
+            elif df['isNewSellSignal'].iloc[i]:
+                if in_long:
+                    df.iloc[i, df.columns.get_loc('endLongTrade')] = df['close'].iloc[i]
+                    in_long = False
+                in_short = True
+                entry_price = df['close'].iloc[i]
+                df.iloc[i, df.columns.get_loc('startShortTrade')] = entry_price
 
+            elif in_long and signal.iloc[i] != Direction.LONG:
+                df.iloc[i, df.columns.get_loc('endLongTrade')] = df['close'].iloc[i]
+                in_long = False
 
-        # ============================
-        # ==== Prediction Filters ====
-        # ============================
-
-        # User Defined Filters: Used for adjusting the frequency of the ML Model's predictions
-        filter_all = self.filter.volatility & self.filter.regime & self.filter.adx
-
-        # Filtered Signal: The model's prediction of future price movement direction with user-defined filters applied
-        signal = np.where(((prediction > 0) & filter_all), Direction.LONG, np.where(((prediction < 0) & filter_all), Direction.SHORT, None))
-        signal[0] = (0 if signal[0] == None else signal[0])
-        for i in np.where(signal == None)[0]: signal[i] = signal[i - 1 if i >= 1 else 0]
-        
-        change = lambda ser, i: (shift(ser, i, fill_value=ser[0]) != shift(ser, i+1, fill_value=ser[0]))
-
-        # Bar-Count Filters: Represents strict filters based on a pre-defined holding period of 4 bars
-        barsHeld = []
-        isDifferentSignalType = (signal != shift(signal, 1, fill_value=signal[0]))
-        _sigFlip = np.where(isDifferentSignalType)[0].tolist()
-        if not (len(isDifferentSignalType) in _sigFlip): _sigFlip.append(len(isDifferentSignalType))
-        for i, x in enumerate(_sigFlip):
-            if i > 0: barsHeld.append(0)
-            barsHeld += range(1, x-(-1 if i == 0 else _sigFlip[i-1]))
-        isHeldFourBars = (pd.Series(barsHeld) == 4).tolist()
-        isHeldLessThanFourBars = (pd.Series(barsHeld) < 4).tolist()
-
-        # Fractal Filters: Derived from relative appearances of signals in a given time series fractal/segment with a default length of 4 bars
-        isEarlySignalFlip = (change(signal, 0) & change(signal, 1) & change(signal, 2) & change(signal, 3))
-        isBuySignal = ((signal == Direction.LONG) & isEmaUptrend & isSmaUptrend)
-        isSellSignal = ((signal == Direction.SHORT) & isEmaDowntrend & isSmaDowntrend)
-        isLastSignalBuy = (shift(signal, 4) == Direction.LONG) & shift(isEmaUptrend, 4) & shift(isSmaUptrend, 4)
-        isLastSignalSell = (shift(signal, 4) == Direction.SHORT) & shift(isEmaDowntrend, 4) & shift(isSmaDowntrend, 4)
-        isNewBuySignal = (isBuySignal & isDifferentSignalType)
-        isNewSellSignal = (isSellSignal & isDifferentSignalType)
-
-        crossover   = lambda s1, s2: (s1 > s2) & (shift(s1, 1) < shift(s2, 1))
-        crossunder  = lambda s1, s2: (s1 < s2) & (shift(s1, 1) > shift(s2, 1))
-
-        # Kernel Regression Filters: Filters based on Nadaraya-Watson Kernel Regression using the Rational Quadratic Kernel
-        # For more information on this technique refer to my other open source indicator located here:
-        # https://www.tradingview.com/script/AWNvbPRM-Nadaraya-Watson-Rational-Quadratic-Kernel-Non-Repainting/
-        kFilter = self.filterSettings.kernelFilter
-        self.yhat1 = kernels.rationalQuadratic(src, kFilter.lookbackWindow, kFilter.relativeWeight, kFilter.regressionLevel)
-        self.yhat2 = kernels.gaussian(src, kFilter.lookbackWindow-kFilter.crossoverLag, kFilter.regressionLevel)
-        # Kernel Rates of Change
-        wasBearishRate = np.where(shift(self.yhat1, 2) > shift(self.yhat1, 1), True, False)
-        wasBullishRate = np.where(shift(self.yhat1, 2) < shift(self.yhat1, 1), True, False)
-        isBearishRate = np.where(shift(self.yhat1, 1) > self.yhat1, True, False)
-        isBullishRate = np.where(shift(self.yhat1, 1) < self.yhat1, True, False)
-        isBearishChange = isBearishRate & wasBullishRate
-        isBullishChange = isBullishRate & wasBearishRate
-        # Kernel Crossovers
-        isBullishCrossAlert = crossover(self.yhat2, self.yhat1)
-        isBearishCrossAlert = crossunder(self.yhat2, self.yhat1)
-        isBullishSmooth = (self.yhat2 >= self.yhat1)
-        isBearishSmooth = (self.yhat2 <= self.yhat1)
-        # Kernel Colors
-        # plot(kernelEstimate, color=plotColor, linewidth=2, title="Kernel Regression Estimate")
-        # Alert Variables
-        alertBullish = np.where(kFilter.useKernelSmoothing, isBullishCrossAlert, isBullishChange)
-        alertBearish = np.where(kFilter.useKernelSmoothing, isBearishCrossAlert, isBearishChange)
-        # Bullish and Bearish Filters based on Kernel
-        isBullish = np.where(self.useKernelFilter, np.where(kFilter.useKernelSmoothing, isBullishSmooth, isBullishRate), True)
-        isBearish = np.where(self.useKernelFilter, np.where(kFilter.useKernelSmoothing, isBearishSmooth, isBearishRate) , True)
-
-        # ===========================
-        # ==== Entries and Exits ====
-        # ===========================
-
-        # Entry Conditions: Booleans for ML Model Position Entries
-        startLongTrade = isNewBuySignal & isBullish & isEmaUptrend & isSmaUptrend
-        startShortTrade = isNewSellSignal & isBearish & isEmaDowntrend & isSmaDowntrend
-
-        # Dynamic Exit Conditions: Booleans for ML Model Position Exits based on Fractal Filters and Kernel Regression Filters
-        # lastSignalWasBullish = barssince(startLongTrade) < barssince(startShortTrade)
-        # lastSignalWasBearish = barssince(startShortTrade) < barssince(startLongTrade)
-        barsSinceRedEntry = barssince(startShortTrade)
-        barsSinceRedExit = barssince(alertBullish)
-        barsSinceGreenEntry = barssince(startLongTrade)
-        barsSinceGreenExit = barssince(alertBearish)
-        isValidShortExit = barsSinceRedExit > barsSinceRedEntry
-        isValidLongExit = barsSinceGreenExit > barsSinceGreenEntry
-        endLongTradeDynamic = isBearishChange & shift(isValidLongExit, 1)
-        endShortTradeDynamic = isBullishChange & shift(isValidShortExit, 1)
-
-        # Fixed Exit Conditions: Booleans for ML Model Position Exits based on Bar-Count Filters
-        endLongTradeStrict = ((isHeldFourBars & isLastSignalBuy) | (isHeldLessThanFourBars & isNewSellSignal & isLastSignalBuy)) & shift(startLongTrade, 4)
-        endShortTradeStrict = ((isHeldFourBars & isLastSignalSell) | (isHeldLessThanFourBars & isNewBuySignal & isLastSignalSell)) & shift(startShortTrade, 4)
-        isDynamicExitValid = ~self.settings.useEmaFilter & ~self.settings.useSmaFilter & ~kFilter.useKernelSmoothing
-        endLongTrade = self.settings.useDynamicExits & isDynamicExitValid & endLongTradeDynamic | endLongTradeStrict
-        endShortTrade = self.settings.useDynamicExits & isDynamicExitValid & endShortTradeDynamic | endShortTradeStrict
-
-        self.df['isEmaUptrend'] = isEmaUptrend
-        self.df['isEmaDowntrend'] = isEmaDowntrend
-        self.df['isSmaUptrend'] = isSmaUptrend
-        self.df['isSmaDowntrend'] = isSmaDowntrend
-        self.df["prediction"] = prediction
-        self.df["signal"] = signal
-        self.df["barsHeld"] = barsHeld
-        # self.df["isHeldFourBars"] = isHeldFourBars
-        # self.df["isHeldLessThanFourBars"] = isHeldLessThanFourBars
-        self.df["isEarlySignalFlip"] = isEarlySignalFlip
-        # self.df["isBuySignal"] = isBuySignal
-        # self.df["isSellSignal"] = isSellSignal
-        self.df["isLastSignalBuy"] = isLastSignalBuy
-        self.df["isLastSignalSell"] = isLastSignalSell
-        self.df["isNewBuySignal"] = isNewBuySignal
-        self.df["isNewSellSignal"] = isNewSellSignal
-
-        self.df["startLongTrade"] = np.where(startLongTrade, self.df['low'], np.nan)
-        self.df["startShortTrade"] = np.where(startShortTrade, self.df['high'], np.nan)
-
-        self.df["endLongTrade"] = np.where(endLongTrade, self.df['high'], np.nan)
-        self.df["endShortTrade"] = np.where(endShortTrade, self.df['low'], np.nan)
-
-        self.df["endLongTradeDynamic"] = np.where(endLongTrade, self.df['high'], np.nan)
-        self.df["endShortTradeDynamic"] = np.where(endShortTrade, self.df['low'], np.nan)
-
-
-    # =============================
-    # ==== Dump or Return Data ====
-    # =============================
-
-    def dump(self, name: str):
-        self.df.to_csv(name)
-
+            elif in_short and signal.iloc[i] != Direction.SHORT:
+                df.iloc[i, df.columns.get_loc('endShortTrade')] = df['close'].iloc[i]
+                in_short = False
 
     @property
     def data(self) -> pd.DataFrame:
         return self.df
 
-
-    # =========================
-    # ====    Plotting     ====
-    # =========================
-
-    def plot(self, name: str):
-        import mplfinance as mpf
-        len = self.df.index.size
-
-        # yhat1_g = [self.yhat1[v] if np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.nan for v in range(self.df.head(len).index.size)]
-        # yhat1_r = [self.yhat1[v] if ~np.where(useKernelSmoothing, isBullishSmooth, isBullishRate)[v] else np.nan for v in range(self.df.head(len).index.size)]
-        sub_plots = [
-            #mpf.make_addplot(self.yhat1[:len], ylabel="Kernel Regression Estimate", color='blue'),
-            #mpf.make_addplot(self.yhat2[:len], ylabel="yhat2", color='gray'),
-            mpf.make_addplot(self.df["startLongTrade"], ylabel="startLongTrade", color='green', type='scatter', markersize=120, marker='^'),
-            mpf.make_addplot(self.df["startShortTrade"], ylabel="startShortTrade", color='red', type='scatter', markersize=120, marker='v'),
-            mpf.make_addplot(self.df["endLongTrade"], ylabel="endLongTrade", color='blue', type='scatter', markersize=120, marker='v'),
-            mpf.make_addplot(self.df["endShortTrade"], ylabel="endShortTrade", color='yellow', type='scatter', markersize=120, marker='^'),
-            mpf.make_addplot(self.df["endLongTradeDynamic"], ylabel="endLongTradeDynamic", color='purple', type='scatter', markersize=120, marker='v'),
-            mpf.make_addplot(self.df["endShortTradeDynamic"], ylabel="endShortTradeDynamic", color='orange', type='scatter', markersize=120, marker='^'),
-        ]
-        s = mpf.make_mpf_style(base_mpf_style='yahoo', rc={'figure.facecolor': 'lightgray'}, edgecolor='black',
-                            marketcolors=mpf.make_marketcolors(base_mpf_style='yahoo', inherit=True, alpha=0.2))
-        fig, axlist = mpf.plot(self.df[['open', 'high', 'low', 'close']].head(len), type='candle', style=s, addplot=sub_plots, figsize=(30,40) ,returnfig=True)
-
-        for x in range(len):
-            y = self.df.loc[self.df.index[x], 'low']
-            axlist[0].text(x, y, self.df.loc[self.df.index[x], "prediction"])
-
-        fig.figure.savefig(fname=name)
+    def dump(self, path: str):
+        """Save the result DataFrame to CSV."""
+        self.df.to_csv(path)

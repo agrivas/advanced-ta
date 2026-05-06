@@ -65,7 +65,7 @@ def test_case2(setup):
     lc.dump('output/result2.csv')
 
     df1 = load_data('output/result2.csv')
-    df2 = load_data('expected/lc_case1.csv')
+    df2 = load_data('expected/lc_case2.csv')
 
     assert df1.equals(df2)
 
